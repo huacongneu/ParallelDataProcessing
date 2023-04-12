@@ -1,4 +1,5 @@
 import com.opencsv.CSVParserBuilder;
+import com.opencsv.exceptions.CsvValidationException;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.StringReader;
@@ -23,27 +24,38 @@ public class MedianSalePriceJob {
 
     private Text state = new Text();
     private DoubleWritable medianSalePrice = new DoubleWritable();
+    private DataParser dataParser;
 
     // Emit <State, Median Sale Price>
     public void map(LongWritable key, Text value, Context context) throws IOException, InterruptedException {
-      String line = value.toString();
-      BufferedReader reader = new BufferedReader(new StringReader(line));
-      CSVParser csvParser = new CSVParserBuilder().withSeparator(',').build();
-      String[] parts;
-      while ((parts = csvParser.parseLine(reader.readLine())) != null) {
-        // Extract relevant attributes from the record
-        String yearStr = parts[1].substring(0, 4);
-        String stateCode = parts[10];
-        String propertyTypeId = parts[12];
-        double salePrice = Double.parseDouble(parts[13]);
-
-        // Check if record is for Single Family Home and 2021
-        if (propertyTypeId.equals("6") && yearStr.equals("2021")) {
-          state.set(stateCode);
-          medianSalePrice.set(salePrice);
-          context.write(state, medianSalePrice);
-        }
+      dataParser = new DataParser();
+      Record record = null;
+      try {
+        record = dataParser.getSingleRecord(value.toString());
+      } catch (CsvValidationException e) {
+        throw new RuntimeException(e);
       }
+
+      if (isValidRecord(record)) {
+        state.set(record.getState());
+        medianSalePrice.set(record.getSalePrice());
+        context.write(state, medianSalePrice);
+      }
+    }
+
+    private boolean isValidRecord(Record record) {
+      // 1. the record should be valid
+      if (record.getYear().equals("invalid") || record.getState().equals("invalid") ||
+          record.getPropertyTypeId().equals("invalid") || record.getSalePrice() == -100) {
+        return false;
+      }
+
+      // 2. make a filter: the record should be for single family house and in 2021
+      if (!record.getPropertyTypeId().equals("6") || !record.getYear().equals("2021")) {
+        return false;
+      }
+
+      return true;
     }
   }
 
@@ -72,7 +84,7 @@ public class MedianSalePriceJob {
     }
 
     public void cleanup(Context context) throws IOException, InterruptedException {
-      // Output top 10 states with highest median sale price
+      // Output top 10 states with the highest median sale price
       for (double price : top10States.keySet()) {
         String state = top10States.get(price);
         context.write(new Text(state), new DoubleWritable(price));
@@ -82,7 +94,7 @@ public class MedianSalePriceJob {
 
   public static void main(String[] args) throws Exception {
     Configuration conf = new Configuration();
-    Job job = Job.getInstance(conf, "Median Sale Price by State");
+    Job job = Job.getInstance(conf, "Top 10 states with the highest median sale price");
     job.setJarByClass(MedianSalePriceJob.class);
     job.setMapperClass(Map.class);
     job.setReducerClass(Reduce.class);
