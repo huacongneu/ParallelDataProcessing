@@ -53,7 +53,7 @@
                   <mainClass>MedianSalePriceJob</mainClass>
                 </transformer>
               </transformers>
-              <finalName>${project.artifactId}-MapReduce</finalName>
+              <finalName>${project.artifactId}-Plain</finalName>
             </configuration>
           </execution>
         </executions>
